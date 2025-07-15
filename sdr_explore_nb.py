@@ -13,30 +13,33 @@ app = marimo.App(width="medium", app_title="SDR explore")
 
 @app.cell
 def _():
+    import math
     import os
 
-    import marimo as mo
     import geopandas
     import geometamaker
+    import marimo as mo
+    import matplotlib.pyplot as plt
     from natcap.invest.sdr import sdr
     from natcap.invest import datastack
+    from natcap.invest import spec
     import natcap.invest.utils
-    import matplotlib.pyplot as plt
+
+    import pandas
     import pygeoprocessing
     import yaml
 
     import utils
     return (
         datastack,
-        geometamaker,
         geopandas,
+        math,
         mo,
         natcap,
         os,
         plt,
         pygeoprocessing,
         utils,
-        yaml,
     )
 
 
@@ -45,6 +48,7 @@ def _(datastack, mo):
     logfile_path = mo.cli_args().get('logfile')
     _, ds_info = datastack.get_datastack_info(logfile_path)
     args_dict = ds_info.args
+    args_dict
     return (args_dict,)
 
 
@@ -54,14 +58,14 @@ def _(args_dict, natcap):
     # watershed_results_vector = 'watershed_results_sdr_gura.shp'
     workspace = args_dict['workspace_dir']
     suffix_str = natcap.invest.utils.make_suffix_string(args_dict, 'results_suffix')
-    watershed_results_vector = f'watershed_results_sdr{suffix_str}.shp'
-    return suffix_str, watershed_results_vector, workspace
+    return suffix_str, workspace
 
 
 @app.cell
-def _(geopandas, os, watershed_results_vector, workspace):
-    ws_vector = geopandas.read_file(os.path.join(workspace, watershed_results_vector))
-    return (ws_vector,)
+def _(geopandas, os, suffix_str, workspace):
+    watershed_results_vector_path = os.path.join(workspace, f'watershed_results_sdr{suffix_str}.shp')
+    ws_vector = geopandas.read_file(watershed_results_vector_path)
+    return watershed_results_vector_path, ws_vector
 
 
 @app.cell(hide_code=True)
@@ -73,6 +77,12 @@ def _(mo):
 @app.cell
 def _(mo, ws_vector):
     mo.ui.table(ws_vector.drop(columns=['geometry']))
+    return
+
+
+@app.cell
+def _(utils, watershed_results_vector_path):
+    utils.table_description_to_md(watershed_results_vector_path)
     return
 
 
@@ -105,78 +115,86 @@ def _(math, os, plt, pygeoprocessing, suffix_str, utils, workspace):
     dem_raster_path = os.path.join(workspace, 'intermediate_outputs', f'pit_filled_dem{suffix_str}.tif')
     drains_to_stream_path = os.path.join(workspace, 'intermediate_outputs', f'what_drains_to_stream{suffix_str}.tif')
 
-    raster_info = pygeoprocessing.get_raster_info(dem_raster_path)
-    bbox = raster_info['bounding_box']
-    xy_ratio = (bbox[2] - bbox[0]) / (bbox[3] - bbox[1])
-    print(xy_ratio)
-
-    def plot_raster_list(tif_list, colormap='viridis', row_major=True):
+    def plot_raster_list(tif_list, colormap_list=['viridis'], row_major=True):
+        raster_info = pygeoprocessing.get_raster_info(tif_list[0])
+        bbox = raster_info['bounding_box']
+        xy_ratio = (bbox[2] - bbox[0]) / (bbox[3] - bbox[1])
         n_plots = len(tif_list)
         n_cols = n_plots
         n_rows = 1
-        if n_plots > 4:
-            n_cols = 4
+        if n_plots > 2:
+            n_cols = 2
             n_rows = int(math.ceil(n_plots / n_cols))
         if not row_major:
             nc = n_cols
             n_cols = n_rows
             n_rows = nc
         fig, axes = plt.subplots(n_rows, n_cols, figsize=(n_cols*xy_ratio*2, n_rows*2))
-        for ax, tif in zip(axes.flatten(), tif_list):
+        for ax, tif, cmap in zip(axes.flatten(), tif_list, colormap_list):
             arr = utils.read_masked_array(tif)
-            ax.imshow(arr, cmap=colormap)
+            ax.imshow(arr, cmap=cmap)
             ax.set(title=f"{os.path.basename(tif)}")
             ax.set_axis_off()
         return fig
 
-    fig = plot_raster_list([streams_raster_path, dem_raster_path, drains_to_stream_path], row_major=False)
+    fig = plot_raster_list(
+        [streams_raster_path, dem_raster_path, drains_to_stream_path],
+        colormap_list=['binary', 'Greys', 'binary'],
+        row_major=False)
     fig
+    return (plot_raster_list,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""## Raster Summary Statistics""")
     return
 
 
 @app.cell(hide_code=True)
 def _(mo):
-    mo.md(r"""### NoData Summary""")
+    mo.md(r"""#### Outputs:""")
     return
 
 
 @app.cell
-def _(geometamaker, yaml):
-    def geometamaker_load(filepath):
-        with open(filepath, 'r') as file:
-            yaml_string = file.read()
-            yaml_dict = yaml.safe_load(yaml_string)
-            if not yaml_dict or ('metadata_version' not in yaml_dict
-                                 and 'geometamaker_version' not in yaml_dict):
-                message = (f'{filepath} exists but is not compatible with '
-                           f'geometamaker.')
-                raise ValueError(message)
-
-        return geometamaker.geometamaker.RESOURCE_MODELS[yaml_dict['type']](**yaml_dict)
-    return (geometamaker_load,)
+def _(utils, workspace):
+    utils.raster_workspace_summary(workspace)
+    return
 
 
-@app.cell
-def _(geometamaker, geometamaker_load, os, pandas, workspace):
-    raster_summary = {}
-    for path, dirs, files in os.walk(workspace):
-        for file in files:
-            if file.endswith('.yml'):
-                filepath = os.path.join(path, file)
-                try:
-                    resource = geometamaker_load(filepath)
-                except Exception as err:
-                    print(filepath)
-                    raise err
-                if isinstance(resource, geometamaker.models.RasterResource):
-                    band = resource.get_band_description(1)
-                    raster_summary[os.path.basename(resource.path)] = band.gdal_metadata
-    pandas.DataFrame(raster_summary)
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""#### Inputs:""")
     return
 
 
 @app.cell
-def _():
+def _(args_dict, utils):
+    utils.raster_inputs_summary(args_dict)
+    return
+
+
+@app.cell
+def _(args_dict, plot_raster_list):
+    raster_cmap_dict = {
+        args_dict['dem_path']: 'Greys',
+        args_dict['drainage_path']: 'binary',
+        args_dict['erodibility_path']: 'viridis',
+        args_dict['erosivity_path']: 'viridis',
+        args_dict['lulc_path']: 'Dark2'
+    }
+
+    # input_tif_list, cmap_list = [
+    #     (tif, cmap) for tif, cmap in raster_cmap_dict.items() if tif]
+
+    input_tif_list = [tif for tif in raster_cmap_dict if tif]
+    cmap_list = [cmap for tif, cmap in raster_cmap_dict.items() if tif]
+
+    plot_raster_list(
+        input_tif_list,
+        colormap_list=cmap_list,
+        row_major=False)
     return
 
 
