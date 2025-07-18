@@ -6,6 +6,7 @@ import numpy
 import pygeoprocessing
 import matplotlib.pyplot as plt
 import marimo as mo
+import pandas
 import yaml
 
 
