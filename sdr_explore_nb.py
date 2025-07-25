@@ -30,22 +30,13 @@ def _():
     import yaml
 
     import utils
-    return (
-        datastack,
-        geopandas,
-        math,
-        mo,
-        natcap,
-        os,
-        plt,
-        pygeoprocessing,
-        utils,
-    )
+    return datastack, geopandas, mo, natcap, os, plt, utils
 
 
 @app.cell
 def _(datastack, mo):
     logfile_path = mo.cli_args().get('logfile')
+    logfile_path = 'C:/Users/dmf/projects/forum/sdr_ndr_swy_luzon/sdr_example/InVEST-sdr-log-2025-07-21--14_04_29.txt'
     _, ds_info = datastack.get_datastack_info(logfile_path)
     args_dict = ds_info.args
     mo.accordion({'SDR model arguments': args_dict})
@@ -88,84 +79,63 @@ def _(utils, watershed_results_vector_path):
 
 @app.cell
 def _(plt, ws_vector):
-    def _plot():
+    def _plot_watersheds(gdf):
         fields = ["usle_tot", "sed_export", "sed_dep", "avoid_exp", "avoid_eros"]
         fig, [[ax1, ax2, ax3], [ax4, ax5, ax6]] = plt.subplots(2, 3, figsize=(15, 4))
         for ax, field in zip([ax1, ax2, ax3, ax4, ax5], fields):
-            ws_vector.plot(ax=ax, column=field, cmap="Greens", edgecolor='lightgray')
+            gdf.plot(ax=ax, column=field, cmap="Greens", edgecolor='lightgray')
             ax.set(title=f"{field}")
             ax.set_axis_off()
-        ws_vector.plot(ax=ax6, facecolor="none", edgecolor='lightgray')
-        ws_vector.apply(lambda x: ax6.annotate(text=x['ws_id'], xy=x.geometry.centroid.coords[0], ha='center'), axis=1);
+        gdf.plot(ax=ax6, facecolor="none", edgecolor='lightgray')
+        gdf.apply(lambda x: ax6.annotate(text=x.index, xy=x.geometry.centroid.coords[0], ha='center'), axis=1);
         ax6.set_axis_off()
         return fig
-    _plot()
+    if len(ws_vector) > 1:
+        _plot_watersheds(ws_vector)
     return
 
 
 @app.cell
-def _(mo, os, plot_raster_list, suffix_str, workspace):
-    _raster_cmap_list = (
-        (os.path.join(workspace, f'avoided_erosion{suffix_str}.tif'), 'viridis', 'linear'),
-        (os.path.join(workspace, f'avoided_export{suffix_str}.tif'), 'viridis', 'log'),
-        (os.path.join(workspace, f'sed_deposition{suffix_str}.tif'), 'viridis', 'log'),
-        (os.path.join(workspace, f'sed_export{suffix_str}.tif'), 'viridis', 'log'),
-        (os.path.join(workspace, f'rkls{suffix_str}.tif'), 'viridis', 'linear'),
-        (os.path.join(workspace, f'usle{suffix_str}.tif'), 'viridis', 'log')
+def _(mo, os, suffix_str, utils, workspace):
+    _raster_dtype_list = (
+        (os.path.join(workspace, f'avoided_erosion{suffix_str}.tif'), 'continuous', 'linear'),
+        (os.path.join(workspace, f'avoided_export{suffix_str}.tif'), 'continuous', 'log'),
+        (os.path.join(workspace, f'sed_deposition{suffix_str}.tif'), 'continuous', 'log'),
+        (os.path.join(workspace, f'sed_export{suffix_str}.tif'), 'continuous', 'log'),
+        (os.path.join(workspace, f'rkls{suffix_str}.tif'), 'continuous', 'linear'),
+        (os.path.join(workspace, f'usle{suffix_str}.tif'), 'continuous', 'log')
     )
 
-    _tif_list, _cmap_list, _transform_list = zip(*_raster_cmap_list)
+    _tif_list, _dtype_list, _transform_list = zip(*_raster_dtype_list)
 
-    _figure = plot_raster_list(
+    _figure = utils.plot_raster_list(
         _tif_list,
-        colormap_list=_cmap_list,
+        datatype_list=_dtype_list,
         transform_list=_transform_list,
-        row_major=True)
+    )
 
     mo.accordion({'Raster Results': _figure})
     return
 
 
 @app.cell
-def _(math, mo, os, plt, pygeoprocessing, suffix_str, utils, workspace):
-    streams_raster_path = os.path.join(workspace, f'stream{suffix_str}.tif')
-    dem_raster_path = os.path.join(workspace, 'intermediate_outputs', f'pit_filled_dem{suffix_str}.tif')
-    drains_to_stream_path = os.path.join(workspace, 'intermediate_outputs', f'what_drains_to_stream{suffix_str}.tif')
+def _(args_dict, mo, os, suffix_str, utils, workspace):
+    _raster_dtype_list = [
+        (os.path.join(workspace, 'intermediate_outputs', f'pit_filled_dem{suffix_str}.tif'), 'continuous'),
+        (os.path.join(workspace, 'intermediate_outputs', f'what_drains_to_stream{suffix_str}.tif'), 'binary'),
+    ]
 
-    def plot_raster_list(tif_list, colormap_list=None, transform_list=None, row_major=True):
-        raster_info = pygeoprocessing.get_raster_info(tif_list[0])
-        bbox = raster_info['bounding_box']
-        xy_ratio = (bbox[2] - bbox[0]) / (bbox[3] - bbox[1])
-        n_plots = len(tif_list)
-        n_cols = n_plots
-        n_rows = 1
-        if n_plots > 2:
-            n_cols = 2
-            n_rows = int(math.ceil(n_plots / n_cols))
-        if not row_major:
-            nc = n_cols
-            n_cols = n_rows
-            n_rows = nc
-        fig, axes = plt.subplots(n_rows, n_cols, figsize=(n_cols*xy_ratio*2, n_rows*2))
+    # D8 streams are single pixel wide and illegible at this scale
+    if args_dict['flow_dir_algorithm'] != 'D8':
+        _raster_dtype_list.append((os.path.join(workspace, f'stream{suffix_str}.tif'), 'binary'))
 
-        if colormap_list is None:
-            colormap_list = ['viridis'] * n_plots
-        if transform_list is None:
-            transform_list = ['linear'] * n_plots
-        for ax, tif, cmap, transform in zip(axes.flatten(), tif_list, colormap_list, transform_list):
-            arr = utils.read_masked_array(tif)
-            mappable = ax.imshow(arr, cmap=cmap, norm=transform)
-            ax.set(title=f"{os.path.basename(tif)}")
-            ax.set_axis_off()
-            fig.colorbar(mappable, ax=ax)
-        return fig
+    _tif_list, _dtype_list, = zip(*_raster_dtype_list)
 
-    _figure = plot_raster_list(
-        [streams_raster_path, dem_raster_path, drains_to_stream_path],
-        colormap_list=['binary', 'Greys', 'binary'],
-        row_major=False)
+    _figure = utils.plot_raster_list(
+        _tif_list,
+        datatype_list=_dtype_list)
     mo.accordion({'Stream Network Maps': _figure})
-    return (plot_raster_list,)
+    return
 
 
 @app.cell
@@ -180,26 +150,37 @@ def _(args_dict, mo, utils, workspace):
 
 
 @app.cell
-def _(args_dict, mo, plot_raster_list):
-    _raster_cmap_list = (
-        (args_dict['dem_path'], 'Greys'),
-        (args_dict['erodibility_path'], 'viridis'),
-        (args_dict['erosivity_path'], 'viridis'),
-        (args_dict['lulc_path'], 'Set3')
+def _(args_dict, mo, utils):
+    _raster_dtype_list = (
+        (args_dict['dem_path'], 'continuous'),
+        (args_dict['erodibility_path'], 'continuous'),
+        (args_dict['erosivity_path'], 'continuous'),
+        (args_dict['lulc_path'], 'nominal')
     )
 
     # This arg is optional and may not exist
     if args_dict['drainage_path']:
-        _raster_cmap_list.append(args_dict['drainage_path'], 'binary')
+        _raster_dtype_list.append(args_dict['drainage_path'], 'binary')
 
-    _tif_list, _cmap_list, = zip(*_raster_cmap_list)
+    _tif_list, _dtype_list, = zip(*_raster_dtype_list)
 
-    _figure = plot_raster_list(
+    _figure = utils.plot_raster_list(
         _tif_list,
-        colormap_list=_cmap_list,
-        row_major=False)
+        datatype_list=_dtype_list,
+    )
 
     mo.accordion({'Input Maps': _figure})
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(
+        r"""
+    ## *
+    Raster plots with an __*__ were resampled to lower resolution for plotting. Full resolution rasters are available in the output workspace.
+    """
+    )
     return
 
 

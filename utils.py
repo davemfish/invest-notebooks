@@ -8,28 +8,86 @@ import matplotlib.pyplot as plt
 import marimo as mo
 import pandas
 import yaml
+from osgeo import gdal
+
+params = {
+    'legend.fontsize': 'small',
+    # 'figure.figsize': (15, 5),
+    # 'axes.labelsize': 'x-large',
+    'axes.titlesize': 'small',
+    'xtick.labelsize': 'small',
+    'ytick.labelsize': 'small'
+    }
+plt.rcParams.update(params)
 
 
-def read_masked_array(filepath):
-    nodata = pygeoprocessing.get_raster_info(filepath)['nodata']
-    array = pygeoprocessing.raster_to_numpy_array(filepath)
+def read_masked_array(filepath, resample_method):
+    info = pygeoprocessing.get_raster_info(filepath)
+    nodata = info['nodata'][0]
+    resampled = False
+    if os.path.getsize(filepath) > 4e6:
+        resampled = True
+        raster = gdal.OpenEx(filepath)
+        band = raster.GetRasterBand(1)
+        if band.GetOverviewCount() == 0:
+            pygeoprocessing.build_overviews(
+                filepath,
+                internal=False,
+                resample_method=resample_method,
+                overwrite=False, levels='auto')
+
+        raster = gdal.OpenEx(filepath)
+        band = raster.GetRasterBand(1)
+        n = band.GetOverviewCount()
+        array = band.GetOverview(n - 1).ReadAsArray()
+        raster = band = None
+    else:
+        array = pygeoprocessing.raster_to_numpy_array(filepath)
     masked_array = numpy.where(array == nodata, numpy.nan, array)
-    return masked_array
+    return (masked_array, resampled)
 
 
-def plot_raster_list(tif_list, colormap='viridis'):
+COLORMAPS = {
+    'continuous': 'viridis',
+    'nominal': 'Set3',
+    'binary': 'binary',
+}
+RESAMPLE_ALGS = {
+    'continuous': 'bilinear',
+    'nominal': 'nearest',
+    'binary': 'nearest',
+}
+
+
+def plot_raster_list(tif_list, datatype_list, transform_list=None):
+    raster_info = pygeoprocessing.get_raster_info(tif_list[0])
+    bbox = raster_info['bounding_box']
+    xy_ratio = (bbox[2] - bbox[0]) / (bbox[3] - bbox[1])
     n_plots = len(tif_list)
-    n_cols = n_plots
-    n_rows = 1
-    if n_plots > 4:
-        n_cols = 4
-        n_rows = int(math.ceil(n_plots / n_cols))
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(n_cols*3, n_rows*3))
-    for ax, tif in zip(axes.flatten(), tif_list):
-        arr = read_masked_array(tif)
-        ax.imshow(arr, cmap=colormap)
-        ax.set(title=f"{os.path.basename(tif)}")
-        ax.set_axis_off()
+    if xy_ratio <= 1:
+        n_cols = 3
+    if xy_ratio > 1:
+        n_cols = 2
+    if xy_ratio > 2:
+        n_cols = 1
+    n_rows = int(math.ceil(n_plots / n_cols))
+
+    fig, axes = plt.subplots(
+        n_rows, n_cols, figsize=(12, n_rows*4))
+
+    # if colormap_list is None:
+    #     colormap_list = ['viridis'] * n_plots
+    if transform_list is None:
+        transform_list = ['linear'] * n_plots
+    for ax, tif, dtype, transform in zip(
+            axes.flatten(), tif_list, datatype_list, transform_list):
+        cmap = COLORMAPS[dtype]
+        arr, resampled = read_masked_array(tif, RESAMPLE_ALGS[dtype])
+        mappable = ax.imshow(arr, cmap=cmap, norm=transform)
+        ax.set(title=f"{os.path.basename(tif)}{'*' if resampled else ''}")
+        # ax.set_axis_off()
+        fig.colorbar(mappable, ax=ax)
+    [ax.set_axis_off() for ax in axes.flatten()]
     return fig
 
 
@@ -48,6 +106,8 @@ def geometamaker_load(filepath):
 
 
 STATS_LIST = ['STATISTICS_VALID_PERCENT', 'STATISTICS_MINIMUM', 'STATISTICS_MAXIMUM', 'STATISTICS_MEAN']
+
+
 def raster_workspace_summary(workspace):
     raster_summary = {}
     for path, dirs, files in os.walk(workspace):
