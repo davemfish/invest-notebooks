@@ -6,6 +6,16 @@ app = marimo.App(width="medium", app_title="Taskgraph File Graph")
 
 @app.cell
 def _():
+    """Explore taskgaph database to understand file provenance.
+
+    This notebook depends on experimental changes to the taskgraph db.
+    Those changes are at https://github.com/davemfish/taskgraph/tree/exp/file-provenance
+    """
+    return
+
+
+@app.cell
+def _():
     import collections
     import json
     import os
