@@ -10,15 +10,13 @@ import pandas
 import yaml
 from osgeo import gdal
 
-params = {
+MATPLOTLIB_PARAMS = {
     'legend.fontsize': 'small',
-    # 'figure.figsize': (15, 5),
-    # 'axes.labelsize': 'x-large',
     'axes.titlesize': 'small',
     'xtick.labelsize': 'small',
     'ytick.labelsize': 'small'
     }
-plt.rcParams.update(params)
+plt.rcParams.update(MATPLOTLIB_PARAMS)
 
 
 def read_masked_array(filepath, resample_method):
@@ -59,24 +57,40 @@ RESAMPLE_ALGS = {
 }
 
 
-def plot_raster_list(tif_list, datatype_list, transform_list=None):
-    raster_info = pygeoprocessing.get_raster_info(tif_list[0])
-    bbox = raster_info['bounding_box']
-    xy_ratio = (bbox[2] - bbox[0]) / (bbox[3] - bbox[1])
-    n_plots = len(tif_list)
+def _figure_subplots(map_bbox, n_plots):
+    xy_ratio = (map_bbox[2] - map_bbox[0]) / (map_bbox[3] - map_bbox[1])
     if xy_ratio <= 1:
         n_cols = 3
     if xy_ratio > 1:
         n_cols = 2
-    if xy_ratio > 2:
+    if xy_ratio > 4:
         n_cols = 1
     n_rows = int(math.ceil(n_plots / n_cols))
 
-    fig, axes = plt.subplots(
-        n_rows, n_cols, figsize=(12, n_rows*4))
+    width = 12
+    sub_width = width / n_cols
+    sub_height = sub_width / xy_ratio
+    return plt.subplots(
+        n_rows, n_cols, figsize=(width, n_rows*sub_height))
 
-    # if colormap_list is None:
-    #     colormap_list = ['viridis'] * n_plots
+
+def plot_choropleth(gdf, field_list):
+    n_plots = len(field_list)
+    fig, axes = _figure_subplots(gdf.total_bounds, n_plots)
+    for ax, field in zip(axes.flatten(), field_list):
+        gdf.plot(ax=ax, column=field, cmap="Greens", edgecolor='lightgray')
+        ax.set(title=f"{field}")
+    [ax.set_axis_off() for ax in axes.flatten()]
+    return fig
+
+
+def plot_raster_list(tif_list, datatype_list, transform_list=None):
+    raster_info = pygeoprocessing.get_raster_info(tif_list[0])
+    bbox = raster_info['bounding_box']
+    n_plots = len(tif_list)
+
+    fig, axes = _figure_subplots(bbox, n_plots)
+
     if transform_list is None:
         transform_list = ['linear'] * n_plots
     for ax, tif, dtype, transform in zip(
@@ -85,7 +99,6 @@ def plot_raster_list(tif_list, datatype_list, transform_list=None):
         arr, resampled = read_masked_array(tif, RESAMPLE_ALGS[dtype])
         mappable = ax.imshow(arr, cmap=cmap, norm=transform)
         ax.set(title=f"{os.path.basename(tif)}{'*' if resampled else ''}")
-        # ax.set_axis_off()
         fig.colorbar(mappable, ax=ax)
     [ax.set_axis_off() for ax in axes.flatten()]
     return fig

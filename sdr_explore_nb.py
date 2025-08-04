@@ -30,13 +30,14 @@ def _():
     import yaml
 
     import utils
-    return datastack, geopandas, mo, natcap, os, plt, utils
+    return datastack, geopandas, mo, natcap, os, utils
 
 
 @app.cell
 def _(datastack, mo):
     logfile_path = mo.cli_args().get('logfile')
-    logfile_path = 'C:/Users/dmf/projects/forum/sdr_ndr_swy_luzon/sdr_example/InVEST-sdr-log-2025-07-21--14_04_29.txt'
+    # logfile_path = 'C:/Users/dmf/projects/forum/sdr_ndr_swy_luzon/sdr_example/InVEST-sdr-log-2025-07-21--14_04_29.txt'
+    # logfile_path = 'C:/Users/dmf/projects/forum/sdr/sample_report3/InVEST-sdr-log-2025-07-18--14_34_11.txt'
     _, ds_info = datastack.get_datastack_info(logfile_path)
     args_dict = ds_info.args
     mo.accordion({'SDR model arguments': args_dict})
@@ -45,8 +46,6 @@ def _(datastack, mo):
 
 @app.cell
 def _(args_dict, natcap):
-    # workspace = 'C:/Users/dmf/projects/forum/sdr/sample_3_16_0'
-    # watershed_results_vector = 'watershed_results_sdr_gura.shp'
     workspace = args_dict['workspace_dir']
     suffix_str = natcap.invest.utils.make_suffix_string(args_dict, 'results_suffix')
     return suffix_str, workspace
@@ -59,6 +58,12 @@ def _(geopandas, os, suffix_str, workspace):
     return watershed_results_vector_path, ws_vector
 
 
+@app.cell
+def _(ws_vector):
+    ws_vector.explore()
+    return
+
+
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""## Results by Watershed""")
@@ -67,7 +72,8 @@ def _(mo):
 
 @app.cell
 def _(mo, ws_vector):
-    mo.ui.table(ws_vector.drop(columns=['geometry']))
+    _table = ws_vector.drop(columns=['geometry'])
+    mo.ui.table(_table)
     return
 
 
@@ -78,20 +84,11 @@ def _(utils, watershed_results_vector_path):
 
 
 @app.cell
-def _(plt, ws_vector):
-    def _plot_watersheds(gdf):
-        fields = ["usle_tot", "sed_export", "sed_dep", "avoid_exp", "avoid_eros"]
-        fig, [[ax1, ax2, ax3], [ax4, ax5, ax6]] = plt.subplots(2, 3, figsize=(15, 4))
-        for ax, field in zip([ax1, ax2, ax3, ax4, ax5], fields):
-            gdf.plot(ax=ax, column=field, cmap="Greens", edgecolor='lightgray')
-            ax.set(title=f"{field}")
-            ax.set_axis_off()
-        gdf.plot(ax=ax6, facecolor="none", edgecolor='lightgray')
-        gdf.apply(lambda x: ax6.annotate(text=x.index, xy=x.geometry.centroid.coords[0], ha='center'), axis=1);
-        ax6.set_axis_off()
-        return fig
+def _(mo, utils, ws_vector):
+    # No reason for choropleth when there is only one feature
     if len(ws_vector) > 1:
-        _plot_watersheds(ws_vector)
+        _fields = ["usle_tot", "sed_export", "sed_dep", "avoid_exp", "avoid_eros"]
+        mo.ui.replace(utils.plot_choropleth(ws_vector, _fields))
     return
 
 
