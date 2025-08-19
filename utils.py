@@ -10,6 +10,7 @@ import pandas
 import yaml
 from osgeo import gdal
 
+
 MATPLOTLIB_PARAMS = {
     'legend.fontsize': 'small',
     'axes.titlesize': 'small',
@@ -17,6 +18,8 @@ MATPLOTLIB_PARAMS = {
     'ytick.labelsize': 'small'
     }
 plt.rcParams.update(MATPLOTLIB_PARAMS)
+
+FIGURE_WIDTH = 12
 
 
 def read_masked_array(filepath, resample_method):
@@ -57,7 +60,7 @@ RESAMPLE_ALGS = {
 }
 
 
-def _figure_subplots(map_bbox, n_plots):
+def _choose_n_rows_n_cols(map_bbox, n_plots):
     xy_ratio = (map_bbox[2] - map_bbox[0]) / (map_bbox[3] - map_bbox[1])
     if xy_ratio <= 1:
         n_cols = 3
@@ -65,13 +68,20 @@ def _figure_subplots(map_bbox, n_plots):
         n_cols = 2
     if xy_ratio > 4:
         n_cols = 1
+    if n_cols > n_plots:
+        n_cols = n_plots
     n_rows = int(math.ceil(n_plots / n_cols))
+    return n_rows, n_cols, xy_ratio
 
-    width = 12
-    sub_width = width / n_cols
+
+def _figure_subplots(map_bbox, n_plots):
+    n_rows, n_cols, xy_ratio = _choose_n_rows_n_cols(map_bbox, n_plots)
+
+    # width = 12
+    sub_width = FIGURE_WIDTH / n_cols
     sub_height = sub_width / xy_ratio
     return plt.subplots(
-        n_rows, n_cols, figsize=(width, n_rows*sub_height))
+        n_rows, n_cols, figsize=(FIGURE_WIDTH, n_rows*sub_height))
 
 
 def plot_choropleth(gdf, field_list):
