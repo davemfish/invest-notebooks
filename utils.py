@@ -4,6 +4,7 @@ import os
 import geometamaker
 import numpy
 import pygeoprocessing
+import matplotlib
 import matplotlib.pyplot as plt
 import marimo as mo
 import pandas
@@ -48,13 +49,16 @@ def read_masked_array(filepath, resample_method):
     return (masked_array, resampled)
 
 
+# Mapping 'datatype' to colormaps and resampling algorithms
 COLORMAPS = {
     'continuous': 'viridis',
+    'divergent': 'BrBG',
     'nominal': 'Set3',
     'binary': 'binary',
 }
 RESAMPLE_ALGS = {
     'continuous': 'bilinear',
+    'divergent': 'bilinear',
     'nominal': 'nearest',
     'binary': 'nearest',
 }
@@ -77,7 +81,6 @@ def _choose_n_rows_n_cols(map_bbox, n_plots):
 def _figure_subplots(map_bbox, n_plots):
     n_rows, n_cols, xy_ratio = _choose_n_rows_n_cols(map_bbox, n_plots)
 
-    # width = 12
     sub_width = FIGURE_WIDTH / n_cols
     sub_height = sub_width / xy_ratio
     return plt.subplots(
@@ -95,6 +98,18 @@ def plot_choropleth(gdf, field_list):
 
 
 def plot_raster_list(tif_list, datatype_list, transform_list=None):
+    """Plot a list of rasters.
+
+    Args:
+        tif_list (list): list of filepaths to rasters
+        datatype_list (list): list of strings describing the data
+            of each raster. One of,
+            ('continuous', 'divergent', 'nominal', 'binary').
+        transform_list (list): list of strings describing the
+            transformation to apply to the colormap.
+            Either 'linear' or 'log'.
+
+    """
     raster_info = pygeoprocessing.get_raster_info(tif_list[0])
     bbox = raster_info['bounding_box']
     n_plots = len(tif_list)
@@ -106,8 +121,67 @@ def plot_raster_list(tif_list, datatype_list, transform_list=None):
     for ax, tif, dtype, transform in zip(
             axes.flatten(), tif_list, datatype_list, transform_list):
         cmap = COLORMAPS[dtype]
+        if dtype == 'divergent':
+            if transform == 'log':
+                transform = matplotlib.colors.SymLogNorm(linthresh=0.03)
+            else:
+                transform = matplotlib.colors.CenteredNorm()
         arr, resampled = read_masked_array(tif, RESAMPLE_ALGS[dtype])
         mappable = ax.imshow(arr, cmap=cmap, norm=transform)
+        ax.set(title=f"{os.path.basename(tif)}{'*' if resampled else ''}")
+        fig.colorbar(mappable, ax=ax)
+    [ax.set_axis_off() for ax in axes.flatten()]
+    return fig
+
+
+def plot_raster_facets(tif_list, datatype, transform=None):
+    """Plot a list of rasters that will all share a fixed colorscale.
+
+    When all the rasters have the same shape and represent the same variable,
+    it's useful to scale the colorbar to the global min/max values across
+    all rasters, so that the colors are visually comparable across the maps.
+
+    Args:
+        tif_list (list): list of filepaths to rasters
+        datatype (str): string describing the datatype of rasters. One of,
+            ('continuous', 'divergent', 'nominal', 'binary').
+        transform (str): string describing the transformation to apply
+            to the colormap. Either 'linear' or 'log'.
+
+    """
+    raster_info = pygeoprocessing.get_raster_info(tif_list[0])
+    bbox = raster_info['bounding_box']
+    n_plots = len(tif_list)
+    shape = raster_info['overviews'][-1]
+
+    fig, axes = _figure_subplots(bbox, n_plots)
+
+    cmap_str = COLORMAPS[datatype]
+    if transform is None:
+        transform = 'linear'
+    ndarray = numpy.empty((n_plots, shape[1], shape[0]))
+    for i, tif in enumerate(tif_list):
+        arr, resampled = read_masked_array(tif, RESAMPLE_ALGS[datatype])
+        ndarray[i] = arr
+    # Perhaps this could be optimized by reading min/max from tif metadata
+    # instead of storing all arrays in memory
+    vmin = numpy.nanmin(ndarray)
+    vmax = numpy.nanmax(ndarray)
+    cmap = plt.cm.get_cmap(cmap_str)
+    if datatype == 'divergent':
+        if transform == 'log':
+            normalizer = matplotlib.colors.SymLogNorm(linthresh=0.03, vmin=vmin, vmax=vmax)
+        else:
+            normalizer = matplotlib.colors.CenteredNorm(vmin=vmin, vmax=vmax)
+    if transform == 'log':
+        if numpy.isclose(vmin, 0.0):
+            vmin = 1e-6
+        normalizer = matplotlib.colors.LogNorm(vmin=vmin, vmax=vmax)
+        cmap.set_under(cmap.colors[0])  # values below vmin (0s) get this color
+    else:
+        normalizer = plt.Normalize(vmin=vmin, vmax=vmax)
+    for arr, ax in zip(ndarray, axes.flatten()):
+        mappable = ax.imshow(arr, cmap=cmap, norm=normalizer)
         ax.set(title=f"{os.path.basename(tif)}{'*' if resampled else ''}")
         fig.colorbar(mappable, ax=ax)
     [ax.set_axis_off() for ax in axes.flatten()]
